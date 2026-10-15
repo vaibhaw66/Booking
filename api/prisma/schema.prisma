@@ -6,3 +6,212 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ---------- Enums ----------
+
+enum Role {
+  ADMIN
+  SUBADMIN
+  VENDOR
+  CUSTOMER
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum VendorType {
+  DOCTOR
+  HOSPITAL
+}
+
+enum VendorStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum DocumentType {
+  MEDICAL_DEGREE
+  MEDICAL_REGISTRATION
+  GOVT_ID
+  HOSPITAL_LICENSE
+  CLINIC_PHOTO
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ConsultationType {
+  IN_CLINIC
+  ONLINE
+}
+
+// ---------- Users & permissions ----------
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  role         Role
+  name         String
+  email        String?    @unique
+  phone        String?    @unique
+  passwordHash String?
+  firebaseUid  String?    @unique
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdById  String?    @db.Uuid
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  createdBy       User?            @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers    User[]           @relation("UserCreatedBy")
+  permissions     UserPermission[]
+  vendor          Vendor?          @relation("VendorOwner")
+  reviewedVendors Vendor[]         @relation("VendorReviewer")
+
+  @@index([role])
+  @@map("users")
+}
+
+model Permission {
+  id          String           @id @default(uuid()) @db.Uuid
+  code        String           @unique
+  description String
+  users       UserPermission[]
+
+  @@map("permissions")
+}
+
+model UserPermission {
+  userId       String   @db.Uuid
+  permissionId String   @db.Uuid
+  grantedAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@map("user_permissions")
+}
+
+// ---------- Vendors ----------
+
+model Specialty {
+  id       String   @id @default(uuid()) @db.Uuid
+  name     String   @unique
+  isActive Boolean  @default(true)
+  doctors  Doctor[]
+
+  @@map("specialties")
+}
+
+model Vendor {
+  id              String       @id @default(uuid()) @db.Uuid
+  ownerId         String       @unique @db.Uuid
+  type            VendorType
+  status          VendorStatus @default(DRAFT)
+  displayName     String
+  description     String?
+  contactPhone    String?
+  contactEmail    String?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  postalCode      String?
+  country         String       @default("IN")
+  latitude        Float?
+  longitude       Float?
+  geohash         String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  reviewedById    String?      @db.Uuid
+  rejectionReason String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+
+  owner     User             @relation("VendorOwner", fields: [ownerId], references: [id])
+  reviewer  User?            @relation("VendorReviewer", fields: [reviewedById], references: [id])
+  hospital  HospitalProfile?
+  doctors   Doctor[]
+  documents VendorDocument[]
+
+  @@index([status])
+  @@index([type, status])
+  @@index([city])
+  @@index([geohash])
+  @@map("vendors")
+}
+
+model HospitalProfile {
+  id                 String  @id @default(uuid()) @db.Uuid
+  vendorId           String  @unique @db.Uuid
+  registrationNumber String?
+  licenseNumber      String?
+  totalBeds          Int?
+  website            String?
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@map("hospital_profiles")
+}
+
+model Doctor {
+  id                 String             @id @default(uuid()) @db.Uuid
+  vendorId           String             @db.Uuid
+  specialtyId        String?            @db.Uuid
+  name               String
+  gender             String?
+  qualification      String?
+  experienceYears    Int?
+  registrationNumber String?
+  bio                String?
+  profilePhotoKey    String?
+  consultationTypes  ConsultationType[]
+  inClinicFee        Int?
+  onlineFee          Int?
+  slotDurationMins   Int                @default(15)
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  deletedAt          DateTime?
+
+  vendor    Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  specialty Specialty?       @relation(fields: [specialtyId], references: [id])
+  documents VendorDocument[]
+
+  @@index([vendorId])
+  @@index([specialtyId])
+  @@map("doctors")
+}
+
+model VendorDocument {
+  id              String         @id @default(uuid()) @db.Uuid
+  vendorId        String         @db.Uuid
+  doctorId        String?        @db.Uuid
+  type            DocumentType
+  fileKey         String
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  status          DocumentStatus @default(PENDING)
+  rejectionReason String?
+  uploadedAt      DateTime       @default(now())
+
+  vendor Vendor  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  doctor Doctor? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+
+  @@index([vendorId])
+  @@index([doctorId])
+  @@map("vendor_documents")
+}
